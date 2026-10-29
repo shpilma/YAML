@@ -1,0 +1,6 @@
+package_name: "requests"
+repo_url: "https://pypi.org/simple/"
+repo_mode: "real"
+package_version: "2.28.1"
+output_filename: "deps_graph.png"
+max_depth: 3
