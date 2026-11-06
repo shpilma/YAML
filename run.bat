@@ -1,2 +1,2 @@
-py main.py --config config.yaml
+py src\main.py -c config.yaml
 pause

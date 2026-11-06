@@ -1,6 +1,6 @@
-package_name: "requests"
-repo_url: "https://pypi.org/simple/"
+package_name: "wget"
+repo_url: "http://archive.ubuntu.com/ubuntu/dists/jammy/main/binary-amd64/Packages.gz"
 repo_mode: "real"
-package_version: "2.28.1"
-output_filename: "deps_graph.png"
+package_version: "1.21.2-2ubuntu1"
+output_filename: "wget_deps.png"
 max_depth: 3
