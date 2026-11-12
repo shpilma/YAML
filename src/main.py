@@ -1,4 +1,3 @@
-"""Dependency graph visualizer. Stage 2: Fetch apt data."""
 import argparse
 import gzip
 import os
@@ -8,6 +7,8 @@ import yaml
 
 MIN_DEPTH = 1
 VALID_MODES = ("real", "test")
+START_DEPTH = 0
+SEPARATOR = ":"
 
 
 class ConfigError(Exception):
@@ -35,7 +36,9 @@ def validate_str(config: dict, key: str) -> str:
     if val is None:
         raise ConfigError(f"Missing required parameter: '{key}'")
     if not isinstance(val, str) or not val.strip():
-        raise ConfigError(f"Parameter '{key}' must be a non-empty string.")
+        raise ConfigError(
+            f"Parameter '{key}' must be a non-empty string."
+        )
     return val
 
 
@@ -105,8 +108,8 @@ def parse_packages_file(content: str) -> list:
                 current_pkg = {}
             continue
         
-        if ":" in line:
-            key, val = line.split(":", 1)
+        if SEPARATOR in line:
+            key, val = line.split(SEPARATOR, 1)
             current_pkg[key.strip()] = val.strip()
             
     if current_pkg:
@@ -122,14 +125,11 @@ def parse_depends_string(depends: str) -> list:
         dep = dep.strip()
         if not dep:
             continue
-        # Берем первую альтернативу (до |)
         first_alt = dep.split("|")[0].strip()
-        # Убираем версию (>= 1.0)
         if "(" in first_alt:
             first_alt = first_alt.split("(")[0].strip()
-        # Убираем архитектуру (:amd64)
-        if ":" in first_alt:
-            first_alt = first_alt.split(":")[0].strip()
+        if SEPARATOR in first_alt:
+            first_alt = first_alt.split(SEPARATOR)[0].strip()
             
         if first_alt:
             dependencies.append(first_alt)
@@ -137,26 +137,67 @@ def parse_depends_string(depends: str) -> list:
     return dependencies
 
 
-def get_direct_dependencies(config: dict) -> list:
-    """Fetch data and find direct dependencies for the target package."""
-    print(f"Fetching data from {config['repo_url']}...")
-    raw_content = fetch_repo_data(config["repo_url"])
-    packages = parse_packages_file(raw_content)
-    
-    target_name = config["package_name"]
-    target_ver = config["package_version"]
-    
+def build_packages_data(packages: list) -> dict:
+    """Convert list of packages into a name-to-dependencies mapping."""
+    packages_data = {}
     for pkg in packages:
-        pkg_name = pkg.get("Package")
-        pkg_ver = pkg.get("Version")
+        name = pkg.get("Package")
+        if name:
+            depends = pkg.get("Depends", "")
+            packages_data[name] = parse_depends_string(depends)
+    return packages_data
+
+
+def load_test_repo(path: str) -> dict:
+    """Load test repository from a local text file."""
+    graph = {}
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            for line in file:
+                line = line.strip()
+                if not line:
+                    continue
+                if SEPARATOR in line:
+                    pkg, deps = line.split(SEPARATOR, 1)
+                    pkg_name = pkg.strip()
+                    deps_list = deps.strip().split()
+                    graph[pkg_name] = deps_list
+    except FileNotFoundError:
+        raise ConfigError(f"Test repo file not found: {path}")
+    return graph
+
+
+def build_dependency_graph(root_pkg: str, max_depth: int,
+                           packages_data: dict) -> dict:
+    """Build dependency graph using iterative DFS."""
+    graph = {}
+    min_depths = {root_pkg: START_DEPTH}
+    stack = [(root_pkg, START_DEPTH)]
+
+    while stack:
+        current_pkg, depth = stack.pop()
         
-        if pkg_name == target_name and pkg_ver == target_ver:
-            depends_str = pkg.get("Depends", "")
-            return parse_depends_string(depends_str)
-            
-    raise ConfigError(
-        f"Package '{target_name}' version '{target_ver}' not found."
-    )
+        if depth > max_depth:
+            continue
+        
+        if current_pkg not in graph:
+            graph[current_pkg] = packages_data.get(current_pkg, [])
+        
+        for dep in graph[current_pkg]:
+            new_depth = depth + 1
+            if dep not in min_depths or new_depth < min_depths[dep]:
+                min_depths[dep] = new_depth
+                stack.append((dep, new_depth))
+                
+    return graph
+
+
+def print_graph(graph: dict) -> None:
+    """Print the dependency graph."""
+    print("=== Dependency Graph ===")
+    for pkg, deps in graph.items():
+        dep_str = ", ".join(deps) if deps else "none"
+        print(f"{pkg} -> {dep_str}")
 
 
 def print_parameters(params: dict) -> None:
@@ -170,7 +211,7 @@ def print_parameters(params: dict) -> None:
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Dependency graph visualizer. Stage 2."
+        description="Dependency graph visualizer. Stage 3."
     )
     parser.add_argument(
         "-c", "--config", required=True,
@@ -186,15 +227,24 @@ def main() -> None:
         raw_config = load_yaml(args.config)
         valid_config = validate_config(raw_config)
         
+        print_parameters(valid_config)
+        
         if valid_config["repo_mode"] == "real":
-            deps = get_direct_dependencies(valid_config)
-            print(f"\nDirect dependencies for {valid_config['package_name']}"
-                  f" ({valid_config['package_version']}):")
-            for dep in deps:
-                print(f" - {dep}")
+            raw_data = fetch_repo_data(valid_config["repo_url"])
+            packages = parse_packages_file(raw_data)
+            packages_data = build_packages_data(packages)
         else:
-            print("Test mode is not implemented yet (Stage 3).")
+            packages_data = load_test_repo(
+                valid_config["repo_url"]
+            )
             
+        graph = build_dependency_graph(
+            valid_config["package_name"],
+            valid_config["max_depth"],
+            packages_data
+        )
+        print_graph(graph)
+        
     except ConfigError as err:
         print(f"Error: {err}", file=sys.stderr)
         sys.exit(1)

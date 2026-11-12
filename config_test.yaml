@@ -1,0 +1,6 @@
+package_name: "A"
+repo_url: "tests/test_graph.txt"
+repo_mode: "test"
+package_version: "1.0"
+output_filename: "test.png"
+max_depth: 3
